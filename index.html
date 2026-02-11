@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loan Tracker (Private)</title>
+
+<style>
+body {font-family: Arial, sans-serif; background:#f4f6f8; padding:20px;}
+h1{text-align:center}
+.container{max-width:900px;margin:auto}
+.card{background:#fff;padding:20px;margin-bottom:20px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border:1px solid #ddd;padding:8px;text-align:center}
+th{background:#1a73e8;color:#fff}
+.paid{color:green;font-weight:bold}
+.pending{background:orange;color:#fff;font-weight:bold;}
+button{padding:8px 14px;margin:4px;cursor:pointer;border-radius:4px;border:none}
+.add-button{background:#1a73e8;color:#fff}
+.undo-btn{background:orange;color:#fff;margin-left:8px;}
+input{padding:6px;width:220px}
+label{font-weight:bold;display:block;margin-top:8px}
+.center{text-align:center}
+.hidden{display:none}
+.undo-container{margin-top:8px;}
+.blue{color:#1a73e8;font-weight:bold;}
+.orange{color:#f57c00;font-weight:bold;}
+</style>
+</head>
+
+<body>
+
+<h1>🔐 Private Loan Dashboard</h1>
+
+<!-- BORROWER SEARCH -->
+<div class="card center">
+  <h2>View Your Loan</h2>
+  <input id="searchId" placeholder="Enter User ID (1–6 digits)">
+  <br><br>
+  <button class="add-button" onclick="searchLoan()">View</button>
+</div>
+
+<!-- ADMIN LOGIN -->
+<div id="adminForm" class="card center">
+  <h2>Admin Login</h2>
+  <input id="adminUser" placeholder="Username"><br><br>
+  <input id="adminPass" type="password" placeholder="Password"><br><br>
+  <button class="add-button" id="loginBtn">Login</button>
+</div>
+
+<!-- ADMIN CONTROLS -->
+<div id="adminControls" class="card center hidden">
+  <button class="add-button" onclick="toggleForm()">Add Borrower</button>
+  <button class="add-button" onclick="showBreakdown()">Show Breakdown</button>
+  <button class="add-button" onclick="showHome()">Home</button>
+  <button class="add-button" onclick="showAllUserIds()">All User IDs</button>
+  <button class="add-button" onclick="showNextCollection()">Next Collection</button>
+  <button class="add-button" onclick="showDashboardSummary()">Dashboard Summary</button>
+
+  <div id="addForm" class="hidden">
+    <p><b>User ID (1–6 digits, manual input required):</b></p>
+    <input id="uid" placeholder="Enter User ID">
+
+    <label>Borrower Name</label>
+    <input id="name">
+
+    <label>Loan Amount (₱)</label>
+    <input id="amount" type="number">
+
+    <label>Months</label>
+    <input id="months" type="number">
+
+    <label>Release Date</label>
+    <input id="release" type="date">
+
+    <label>Start Payment Date</label>
+    <input id="startPayment" type="date"><br><br>
+
+    <button class="add-button" onclick="saveBorrower()">Save</button>
+  </div>
+</div>
+
+<div class="container" id="list"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBzpiOc27Qy0125-Bq1mDC0e-A3wge4U0g",
+  authDomain: "liveproject-5205a.firebaseapp.com",
+  databaseURL: "https://liveproject-5205a-default-rtdb.firebaseio.com",
+  projectId: "liveproject-5205a"
+};
+firebase.initializeApp(firebaseConfig);
+
+const db = firebase.database();
+const ref = db.ref("borrowers");
+
+const ADMIN = { user:"Yuna@081724", pass:"Yuna@081724" };
+let isAdmin = false;
+let allData = {};
+let deleteHistory = [];
+let paidHistory = [];
+let lastEntries = [];
+
+/* LISTENER */
+ref.on("value", s => {
+  allData = s.val() || {};
+  if(isAdmin) render(Object.entries(allData), true);
+});
+
+/* ADMIN LOGIN */
+document.getElementById("loginBtn").onclick = () => {
+  if(document.getElementById("adminUser").value === ADMIN.user && document.getElementById("adminPass").value === ADMIN.pass){
+    isAdmin = true;
+    document.getElementById("adminForm").classList.add("hidden");
+    document.getElementById("adminControls").classList.remove("hidden");
+    render(Object.entries(allData), true);
+  } else alert("Wrong login");
+};
+
+/* TOGGLE ADD FORM */
+function toggleForm(){
+  document.getElementById("addForm").classList.toggle("hidden");
+}
+
+/* SAVE BORROWER */
+function saveBorrower(){
+  const uidVal = document.getElementById("uid").value.trim();
+  if(!uidVal) return alert("User ID required");
+  if(!/^\d{1,6}$/.test(uidVal)) return alert("User ID 1–6 digits");
+
+  const data = {
+    uid: uidVal,
+    name: document.getElementById("name").value.trim(),
+    amount: +document.getElementById("amount").value,
+    months: +document.getElementById("months").value,
+    release: document.getElementById("release").value,
+    startPayment: document.getElementById("startPayment").value,
+    paid: 0
+  };
+
+  if(!data.name || !data.release || !data.startPayment) return alert("Complete all fields");
+  if(data.amount<=0 || data.months<=0) return alert("Invalid amount or months");
+
+  if(Object.values(allData).some(b => b.uid===data.uid)) return alert("User ID exists");
+
+  ref.push(data, () => {
+    document.querySelectorAll("#addForm input").forEach(i=>i.value="");
+    alert("Borrower added!");
+  });
+}
+
+/* SEARCH BY USER ID ONLY */
+function searchLoan(){
+  const query = document.getElementById("searchId").value.trim();
+  if(!/^\d{1,6}$/.test(query)){
+    document.getElementById("list").innerHTML="<p class='center'>❌ Enter valid User ID</p>";
+    return;
+  }
+  const result = Object.entries(allData).filter(([_,b])=>b.uid===query);
+  if(!result.length) {
+    document.getElementById("list").innerHTML="<p class='center pending'>❌ No record found / Pending</p>";
+    return;
+  }
+  lastEntries = result;
+  render(result, true);
+}
+
+/* GET PAYMENT DATES (5th & 20th) */
+function getDates(start, months){
+  const dates=[];
+  const d = new Date(start);
+  d.setDate(d.getDate()<=5?5:(d.getDate()<=20?20:5));
+  if(d.getDate()===5 && new Date(start).getDate()>20) d.setMonth(d.getMonth()+1);
+  for(let i=0;i<months*2;i++){
+    dates.push(new Date(d));
+    d.getDate()===5 ? d.setDate(20) : (d.setMonth(d.getMonth()+1), d.setDate(5));
+  }
+  return dates;
+}
+
+/* RENDER BORROWER LIST */
+function render(entries, showName){
+  lastEntries = entries;
+  const list=document.getElementById("list");
+  list.innerHTML="";
+  entries.forEach(([id,b])=>{
+    const interest = b.amount*0.05*b.months;
+    const total = b.amount+interest;
+    const dates = getDates(b.startPayment,b.months);
+
+    list.innerHTML+=`
+    <div class="card">
+      ${showName?`<h3>${b.name}</h3>`:""}
+      <p><b>Loan Amount:</b> ₱${b.amount.toFixed(2)}</p>
+      <p><b>Interest:</b> ₱${interest.toFixed(2)}</p>
+      <p><b>Total Payable:</b> ₱${total.toFixed(2)}</p>
+
+      <table>
+        <tr><th>Date</th><th>Principal</th><th>Interest</th><th>Total</th><th>Status</th></tr>
+        ${dates.map((d,i)=>{
+          const principal = b.amount/(b.months*2);
+          const interestPer = interest/(b.months*2);
+          let status="";
+          if(i<b.paid) status="<span class='paid'>PAID</span>";
+          else status="<span class='pending'>PENDING</span>";
+          if(isAdmin && i>=b.paid) status=`<button onclick="markPaid('${id}',${i})">Mark Paid</button>`;
+          return `<tr>
+            <td>${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
+            <td>₱${principal.toFixed(2)}</td>
+            <td>₱${interestPer.toFixed(2)}</td>
+            <td>₱${(principal+interestPer).toFixed(2)}</td>
+            <td id="status-${id}-${i}">${status}</td>
+          </tr>`;
+        }).join("")}
+      </table>
+      ${isAdmin?`<button onclick="deleteBorrower('${id}')">Delete</button>`:""}
+      <div class="undo-container" id="undo-${id}"></div>
+    </div>`;
+  });
+}
+
+/* MARK PAID + UNDO */
+function markPaid(id,index){
+  const statusTd=document.getElementById(`status-${id}-${index}`);
+  statusTd.innerHTML="<span class='paid'>PAID</span>";
+
+  ref.child(id).once("value",snap=>{
+    const b=snap.val();
+    if(!b) return;
+
+    paidHistory.push({id,index,prevPaid:b.paid});
+    if(paidHistory.length>100) paidHistory.shift();
+
+    ref.child(id).update({paid:b.paid+1});
+
+    const undoSpan=document.getElementById(`undo-${id}`);
+    undoSpan.innerHTML=`<button class="undo-btn" onclick="undoPaid('${id}',${index})">Undo Paid</button>`;
+    setTimeout(()=>{undoSpan.innerHTML="";},10000);
+  });
+}
+
+function undoPaid(id,index){
+  const history=paidHistory.find(h=>h.id===id&&h.index===index);
+  if(!history) return alert("Undo expired");
+  ref.child(id).update({paid:history.prevPaid});
+  paidHistory=paidHistory.filter(h=>!(h.id===id&&h.index===index));
+  render(lastEntries,isAdmin);
+  alert("Mark Paid undone!");
+}
+
+/* DELETE + UNDO */
+function deleteBorrower(id){
+  if(!confirm("Delete borrower?")) return;
+  ref.child(id).once("value",snap=>{
+    const data=snap.val();
+    if(!data) return;
+    ref.child(id).remove();
+    deleteHistory.push({id,data,time:Date.now()});
+    if(deleteHistory.length>50) deleteHistory.shift();
+    const undoSpan=document.getElementById(`undo-${id}`);
+    undoSpan.innerHTML=`<button class="undo-btn" onclick="undoDelete('${id}')">Undo Delete</button>`;
+    setTimeout(()=>{
+      const index=deleteHistory.findIndex(h=>h.id===id);
+      if(index!==-1) deleteHistory.splice(index,1);
+      undoSpan.innerHTML="";
+    },10000);
+  });
+}
+function undoDelete(id){
+  const index=deleteHistory.findIndex(h=>h.id===id);
+  if(index===-1) return alert("Undo expired");
+  const record=deleteHistory[index];
+  ref.child(id).set(record.data);
+  deleteHistory.splice(index,1);
+  render(lastEntries,isAdmin);
+  alert("Borrower restored!");
+}
+
+/* SHOW BREAKDOWN */
+function showBreakdown(){
+  const list=document.getElementById("list");
+  list.innerHTML="";
+  let grandPrincipal=0, grandInterest=0, grandTotal=0;
+  Object.values(allData).forEach(b=>{
+    const interest=b.amount*0.05*b.months;
+    const total = b.amount+interest;
+    const principalPer = b.amount/(b.months*2);
+    const interestPer = interest/(b.months*2);
+    const dates=getDates(b.startPayment,b.months);
+
+    list.innerHTML+=`
+    <div class="card">
+      <h3>${b.name}</h3>
+      <table>
+        <tr><th>Date</th><th>Principal</th><th>Interest</th><th>Total</th></tr>
+        ${dates.map((d,i)=>{
+          if(i>=b.paid){
+            grandPrincipal+=principalPer;
+            grandInterest+=interestPer;
+            grandTotal+=principalPer+interestPer;
+            return `<tr>
+              <td>${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
+              <td>₱${principalPer.toFixed(2)}</td>
+              <td>₱${interestPer.toFixed(2)}</td>
+              <td>₱${(principalPer+interestPer).toFixed(2)}</td>
+            </tr>`;
+          } else return "";
+        }).join("")}
+      </table>
+    </div>`;
+  });
+  list.innerHTML+=`<h2>Grand Total Remaining: ₱${grandTotal.toFixed(2)} (Principal: ₱${grandPrincipal.toFixed(2)}, Interest: ₱${grandInterest.toFixed(2)})</h2>`;
+}
+
+/* SHOW HOME */
+function showHome(){
+  render(lastEntries,isAdmin);
+}
+
+/* SHOW ALL USER IDs (Admin only) */
+function showAllUserIds(){
+  const list=document.getElementById("list");
+  list.innerHTML="";
+  Object.entries(allData).forEach(([id,b])=>{
+    list.innerHTML+=`<div class="card">
+      <input value="${b.uid}" onchange="updateUserId('${id}', this.value)">
+      <span>${b.name}</span>
+    </div>`;
+  });
+}
+function updateUserId(id,newUid){
+  if(!/^\d{1,6}$/.test(newUid)) return alert("User ID 1–6 digits");
+  ref.child(id).update({uid:newUid});
+  alert("User ID updated!");
+}
+
+/* SHOW NEXT COLLECTION (Admin only) */
+function showNextCollection(){
+  const list=document.getElementById("list");
+  list.innerHTML="<h2>Next Collection Dates</h2>";
+  const collectionMap = {};
+
+  Object.values(allData).forEach(b=>{
+    const interest=b.amount*0.05*b.months;
+    const total = b.amount+interest;
+    const principalPer = b.amount/(b.months*2);
+    const interestPer = interest/(b.months*2);
+    const dates = getDates(b.startPayment,b.months);
+
+    dates.forEach((d,i)=>{
+      if(i>=b.paid){
+        const key = d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+        collectionMap[key] = (collectionMap[key]||0) + principalPer + interestPer;
+      }
+    });
+  });
+
+  const sortedDates = Object.keys(collectionMap).sort((a,b)=>{
+    return new Date(a)-new Date(b);
+  });
+
+  list.innerHTML+=`
+    <table>
+      <tr><th>Date</th><th>Total Collection (₱)</th></tr>
+      ${sortedDates.map(d=>{
+        return `<tr><td>${d}</td><td>₱${collectionMap[d].toFixed(2)}</td></tr>`;
+      }).join("")}
+    </table>`;
+}
+
+/* SHOW DASHBOARD SUMMARY (Admin only) */
+function showDashboardSummary(){
+  const list=document.getElementById("list");
+  let totalBorrowers = Object.keys(allData).length;
+  let totalLoaned=0;
+  let totalInterest=0;
+  let grandTotalLoaned=0;
+  let remainingLoan=0;
+  let remainingInterest=0;
+  let grandTotalRemaining=0;
+
+  Object.values(allData).forEach(b=>{
+    totalLoaned += b.amount;
+    const interest = b.amount*0.05*b.months;
+    totalInterest += interest;
+    grandTotalLoaned += b.amount + interest;
+
+    const dates = getDates(b.startPayment,b.months);
+    const principalPer = b.amount/(b.months*2);
+    const interestPer = interest/(b.months*2);
+
+    dates.forEach((d,i)=>{
+      if(i>=b.paid){
+        remainingLoan += principalPer;
+        remainingInterest += interestPer;
+        grandTotalRemaining += principalPer + interestPer;
+      }
+    });
+  });
+
+  list.innerHTML=`
+    <div class="card">
+      <h2>📊 Dashboard Summary</h2>
+      <p><b>Total Borrowers:</b> ${totalBorrowers}</p>
+      <p><b>Total Loaned (Principal):</b> <span class="blue">₱${totalLoaned.toFixed(2)}</span></p>
+      <p><b>Total Interest:</b> <span class="orange">₱${totalInterest.toFixed(2)}</span></p>
+      <p><b>Grand Total Loaned + Interest:</b> <span class="blue">₱${grandTotalLoaned.toFixed(2)}</span></p>
+      <hr>
+      <p><b>Remaining Loan:</b> <span class="blue">₱${remainingLoan.toFixed(2)}</span></p>
+      <p><b>Remaining Interest:</b> <span class="orange">₱${remainingInterest.toFixed(2)}</span></p>
+      <p><b>Grand Total Remaining:</b> <span class="blue">₱${grandTotalRemaining.toFixed(2)}</span></p>
+    </div>
+  `;
+}
+</script>
+
+</body>
+</html>
